@@ -713,8 +713,13 @@ final class EditorSession {
                     guard let image = layer.asset?.image else { return total }
                     return total + image.width * image.height
                 } ?? 0
-                let asset = try await ImageImporter.shared.decode(url, remainingPixels: 100_000_000 - usedPixels)
-                insert(asset, centeredAt: point)
+                if url.pathExtension.lowercased() == "psd",
+                   let psd = try? await PSDImporter.shared.decode(url, remainingPixels: 100_000_000 - usedPixels) {
+                    insertPSD(psd, name: url.deletingPathExtension().lastPathComponent)
+                } else {
+                    let asset = try await ImageImporter.shared.decode(url, remainingPixels: 100_000_000 - usedPixels)
+                    insert(asset, centeredAt: point)
+                }
             } catch {
                 failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
             }
@@ -742,6 +747,33 @@ final class EditorSession {
         if let parent = layer.parentID { collapsedGroupIDs.remove(parent) }
         self.document?.layers.append(layer)
         activeLayerID = layer.id
+    }
+
+    /// A PSD's layer tree: with no document open, becomes the document itself (the PSD's own canvas
+    /// size); into an already-open document, lands as a new top-level group named after the file.
+    func insertPSD(_ result: PSDImporter.Result, name: String) {
+        beginEdit("Import Image")
+        defer { endEdit() }
+        if document == nil {
+            document = CanvasDocument(width: Int(result.canvasSize.width), height: Int(result.canvasSize.height), layers: result.layers)
+            activeLayerID = result.layers.last?.id
+            viewport.fit(documentSize: document!.size)
+            return
+        }
+        guard let document else { return }
+        var wrapper = ImageLayer(name: name, blankSize: document.size)
+        wrapper.isGroup = true
+        wrapper.parentID = activeLayer?.isGroup == true ? activeLayerID : activeLayer?.parentID
+        var layers = document.layers
+        layers.append(wrapper)
+        for var layer in result.layers {
+            if layer.parentID == nil { layer.parentID = wrapper.id }
+            layers.append(layer)
+        }
+        guard (try? LayerHierarchy.validate(layers.map(\.hierarchyRecord))) != nil else { return }
+        self.document?.layers = layers
+        activeLayerID = wrapper.id
+        if let parent = wrapper.parentID { collapsedGroupIDs.remove(parent) }
     }
 
     /// `emptyLayer` starts the canvas with a selected blank "Layer 1", as File > New does.

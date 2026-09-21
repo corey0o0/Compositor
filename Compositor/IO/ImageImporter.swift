@@ -4,6 +4,11 @@ import CoreImage
 import ImageIO
 import UniformTypeIdentifiers
 
+extension UTType {
+    // Merged/flattened composite only; ImageIO has no notion of Photoshop's layers.
+    static let psd = UTType("com.adobe.photoshop-image")!
+}
+
 nonisolated struct ImportedImage: @unchecked Sendable {
     // Immutable CGImages can be shared with the main-thread renderer.
     let image: CGImage
@@ -17,7 +22,7 @@ nonisolated enum ImageImportError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unreadable: "The image could not be read. It may be damaged or unavailable."
-        case .unsupported: "Choose a JPEG, PNG, HEIC, or TIFF image."
+        case .unsupported: "Choose a JPEG, PNG, HEIC, TIFF, or Photoshop image."
         case .tooLarge: "This import exceeds the current 100-megapixel document budget or 30,000-pixel side limit."
         }
     }
@@ -34,7 +39,7 @@ actor ImageImporter {
             guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
                   let identifier = CGImageSourceGetType(source) as String?,
                   let type = UTType(identifier) else { throw ImageImportError.unreadable }
-            guard [UTType.jpeg, .png, .heic, .tiff].contains(where: { type.conforms(to: $0) }) else {
+            guard [UTType.jpeg, .png, .heic, .tiff, .psd].contains(where: { type.conforms(to: $0) }) else {
                 throw ImageImportError.unsupported
             }
             guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
